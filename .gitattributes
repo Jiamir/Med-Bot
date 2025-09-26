@@ -1,0 +1,43 @@
+# Auto-detect text files and normalize line endings to LF in the repo
+* text=auto eol=lf
+
+# Windows users will still see CRLF locally if core.autocrlf=true
+
+# =========================
+# Common file types
+# =========================
+
+# Source code (always normalize)
+*.js   text
+*.jsx  text
+*.ts   text
+*.tsx  text
+*.json text
+*.html text
+*.css  text
+*.scss text
+*.md   text
+*.yml  text
+*.yaml text
+*.py   text
+*.sh   text
+
+# Binary files (no diff/merge)
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.mp4  binary
+*.mp3  binary
+*.wav  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary
+
+# Lockfiles (keep exact line endings)
+package-lock.json -text
+yarn.lock        -text
+pnpm-lock.yaml   -text
