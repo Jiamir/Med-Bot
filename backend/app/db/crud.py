@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from .models import Doctor
+from .models import Doctor, DocumentModel
 
 def get_doctors_by_keyword(db: Session, keyword: str):
     return db.query(Doctor).filter(Doctor.keywords.ilike(f"%{keyword}%")).all()
@@ -9,3 +9,9 @@ def get_doctor_by_id(db: Session, doctor_id: int):
 
 def get_doctors_by_ids(db: Session, ids: list):
     return db.query(Doctor).filter(Doctor.id.in_(ids)).all()
+
+def get_all_documents(db: Session):
+    return db.query(DocumentModel).all()
+
+def get_document_by_id(db: Session, document_id: int):
+    return db.query(DocumentModel).filter(DocumentModel.id == document_id).first()

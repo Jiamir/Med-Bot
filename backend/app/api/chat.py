@@ -2,50 +2,58 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ..db.database import get_db
 from ..db import crud
-from .rag import retrieve_top_doctors
+from .rag import retrieve_top_doctors, retrieve_resources
 from ..core import utils
 from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
 import json
+import asyncio
+from concurrent.futures import TimeoutError
 
-from langchain_groq import ChatGroq  # ✅ use Groq instead of OpenAI
+from langchain_groq import ChatGroq
 
 load_dotenv()
 
 router = APIRouter()
 
-# Load Groq API key
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
 
 class ChatRequest(BaseModel):
     message: str
+
 
 @router.post("/chat")
 def chat(request: ChatRequest, db: Session = Depends(get_db)):
     user_message = request.message.strip()
     if not user_message:
-        return {"response": "Please provide a valid message.", "doctors": []}
+        return {"response": "Please provide a valid message.", "doctors": [], "resources": []}
+
+    print(f"\n{'='*60}")
+    print(f"🔍 Processing query: {user_message}")
+    print(f"{'='*60}")
 
     try:
-        # 1️⃣ Retrieve top doctors via pipeline (with fallback to keyword search)
-        doctors = retrieve_top_doctors(user_message, db)
-        print(f"Found {len(doctors)} doctors for query: {user_message}")
+        # 1️⃣ Retrieve doctors (with timeout protection)
+        print("🔎 Searching for doctors...")
+        try:
+            doctors = retrieve_top_doctors(user_message, db, top_k=5)
+            print(f"✅ Found {len(doctors)} doctors")
+        except Exception as e:
+            print(f"❌ Doctor retrieval error: {e}")
+            doctors = []
 
-        # 2️⃣ Convert doctor objects to structured data
-        doctors_meta = []
-        doctors_for_frontend = []
-        
+        doctors_meta, doctors_for_frontend = [], []
         if doctors:
             for d in doctors:
                 doctors_meta.append({
-                    "name": d.name, 
-                    "speciality": d.speciality, 
+                    "name": d.name,
+                    "speciality": d.speciality,
                     "location": d.location,
                     "fee": getattr(d, 'fee', 'Contact for fee'),
                     "keywords": getattr(d, 'keywords', '')
                 })
-                
                 doctors_for_frontend.append({
                     "name": d.name,
                     "speciality": d.speciality,
@@ -53,142 +61,161 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
                     "fee": getattr(d, 'fee', 'Contact for fee')
                 })
 
-        # 3️⃣ Determine if this is a doctor search query
+        # 2️⃣ Retrieve resources (with timeout protection)
+        print("📚 Searching for resources...")
+        try:
+            resources = retrieve_resources(user_message, top_k=5)
+            print(f"✅ Found {len(resources)} resources")
+        except Exception as e:
+            print(f"❌ Resource retrieval error: {e}")
+            resources = []
+
+        resources_for_frontend = []
+        if resources:
+            for r in resources:
+                resources_for_frontend.append({
+                    "title": r.get("title"),
+                    "url": r.get("url"),
+                    "id": r.get("id")
+                })
+
+        # 3️⃣ Check doctor intent
         query_lower = user_message.lower()
         is_doctor_search = any(word in query_lower for word in [
-            'doctor', 'physician', 'specialist', 'cardiologist', 'gynae', 
+            'doctor', 'physician', 'specialist', 'cardiologist', 'gynae',
             'dermatologist', 'neurologist', 'find', 'need', 'looking for',
             'heart', 'skin', 'bone', 'eye', 'brain', 'child', 'women', 'cardio',
             'ortho', 'pediatric', 'ent', 'surgeon', 'dentist', 'psychiatrist',
-            'urologist', 'oncologist', 'radiologist', 'anesthesiologist'
-        ]) or len(doctors) > 0  # ✅ If we found doctors, it's likely a doctor search
+            'urologist', 'oncologist', 'radiologist', 'anesthesiologist', 'autism'
+        ]) or len(doctors) > 0
 
-        # 4️⃣ Try Groq API, fallback to template response if it fails
+        # 4️⃣ Groq API with timeout protection
         groq_response = None
-        try:
-            if GROQ_API_KEY and GROQ_API_KEY.strip():
+        if GROQ_API_KEY and GROQ_API_KEY.strip():
+            print("🤖 Calling Groq API...")
+            try:
                 llm = ChatGroq(
                     groq_api_key=GROQ_API_KEY,
                     model="llama-3.1-8b-instant",
-                    temperature=0.3,
-                    max_tokens=200
+                    temperature=0.4,
+                    max_tokens=250,
+                    timeout=10  # ✅ 10 second timeout for Groq
                 )
 
-                # ✅ Updated prompt for better responses
-                if is_doctor_search and doctors_meta:
+                # Build prompt based on context
+                if (is_doctor_search and doctors_meta) and resources_for_frontend:
                     prompt = f"""
                     User Query: {user_message}
-                    
-                    I found {len(doctors_meta)} healthcare providers. Please provide a brief, friendly response that:
-                    1. Acknowledges the user's request
-                    2. Mentions the number and type of doctors found
-                    3. Keeps it short since doctor cards will be displayed separately
-                    4. Does NOT list individual doctor names or details
-                    
-                    Example: "I've found {len(doctors_meta)} cardiologists in your area. Please review their profiles below and contact them directly for appointments."
+
+                    I found {len(doctors_meta)} healthcare providers and {len(resources_for_frontend)} helpful articles/resources.  
+                    Write a natural, friendly response that:
+                    - Acknowledges the query
+                    - Mentions both doctors and resources
+                    - Encourages the user to review the cards
+                    - Do not list details (frontend will show them)
+                    """
+                elif is_doctor_search and doctors_meta:
+                    prompt = f"""
+                    User Query: {user_message}
+
+                    I found {len(doctors_meta)} healthcare providers. Please provide a warm, concise response that:
+                    1. Acknowledges the request
+                    2. Mentions the number/type of doctors
+                    3. Encourages checking their profiles
+                    4. Avoids listing details
+                    """
+                elif resources_for_frontend:
+                    prompt = f"""
+                    User Query: {user_message}
+
+                    I found {len(resources_for_frontend)} helpful articles/resources.  
+                    Write a supportive, conversational response that:
+                    - Acknowledges their query
+                    - Mentions that I found useful resources
+                    - Encourages them to review the cards
+                    - Avoids listing titles
                     """
                 else:
                     prompt = utils.build_prompt(user_message, doctors_meta)
 
+                # ✅ Call Groq with error handling
                 response = llm.invoke([
                     {
-                        "role": "system", 
-                        "content": "You are Med-Bot, a friendly AI medical assistant. When doctors are found, keep responses brief since doctor cards will be displayed. Never list individual doctor details - just mention the count and specialty."
+                        "role": "system",
+                        "content": "You are Med-Bot, a caring medical AI assistant. "
+                                   "Keep responses natural, supportive, and expressive. "
+                                   "If doctors/resources are found, mention counts but never details."
                     },
-                    {
-                        "role": "user", 
-                        "content": prompt
-                    }
+                    {"role": "user", "content": prompt}
                 ])
                 groq_response = response.content.strip()
-                
-        except Exception as groq_error:
-            print(f"Groq API error: {groq_error}")
-            groq_response = None
+                print(f"✅ Groq response received: {groq_response[:100]}...")
 
-        # 5️⃣ Generate response - use Groq if available, otherwise template
+            except TimeoutError:
+                print("⏱️ Groq API timeout - using fallback")
+                groq_response = None
+            except Exception as groq_error:
+                print(f"❌ Groq API error: {groq_error}")
+                groq_response = None
+        else:
+            print("⚠️ No Groq API key found")
+
+        # 5️⃣ Final response (Groq or fallback)
         if groq_response:
             answer = groq_response
         else:
-            answer = generate_template_response(user_message, doctors_meta, is_doctor_search)
+            print("📝 Using template response")
+            answer = generate_template_response(
+                user_message, doctors_meta, resources_for_frontend, is_doctor_search
+            )
 
-        # 6️⃣ Return response with doctors array for frontend
-        # ✅ Always return doctors if they were found and it's a doctor search
+        # 6️⃣ Build payload
         response_payload = {
             "response": answer,
-            "doctors": doctors_for_frontend if (is_doctor_search and doctors_for_frontend) else []
+            "doctors": doctors_for_frontend if (is_doctor_search and doctors_for_frontend) else [],
+            "resources": resources_for_frontend
         }
 
-        # ✅ Log full JSON in console
-        print("📝 Response JSON:", json.dumps(response_payload, indent=2))
-        
+        print(f"\n✅ Response ready:")
+        print(f"   - Text: {answer[:100]}...")
+        print(f"   - Doctors: {len(doctors_for_frontend)}")
+        print(f"   - Resources: {len(resources_for_frontend)}")
+        print(f"{'='*60}\n")
+
         return response_payload
 
     except Exception as e:
-        print(f"General error in chat endpoint: {e}")
-        
-        # Emergency fallback
-        try:
-            from .rag import keyword_search_doctors
-            fallback_doctors = keyword_search_doctors(user_message, db, 3)
-            
-            if fallback_doctors:
-                fallback_doctors_frontend = [
-                    {
-                        "name": doc.name,
-                        "speciality": doc.speciality,
-                        "location": doc.location,
-                        "fee": getattr(doc, 'fee', 'Contact for fee')
-                    }
-                    for doc in fallback_doctors
-                ]
-                
-                answer = "I found some healthcare providers that might help. Please contact them directly for appointments."
-                return {
-                    "response": answer,
-                    "doctors": fallback_doctors_frontend
-                }
-            else:
-                return {
-                    "response": "I'm experiencing technical difficulties. Please try again later or contact your healthcare provider directly for urgent medical concerns.",
-                    "doctors": []
-                }
-        except:
-            return {
-                "response": "I'm experiencing technical difficulties. Please try again later or contact your healthcare provider directly for urgent medical concerns.",
-                "doctors": []
-            }
+        print(f"❌ CRITICAL ERROR in chat endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "response": "I'm experiencing some technical issues. Please try again later.",
+            "doctors": [],
+            "resources": []
+        }
 
 
-def generate_template_response(query: str, doctors_meta: list, is_doctor_search: bool) -> str:
-    """Generate a template response when Groq API is not available"""
-    
+def generate_template_response(query: str, doctors_meta: list, resources_meta: list, is_doctor_search: bool) -> str:
+    """Fallback if Groq API fails"""
+
+    # ✅ Both doctors + resources
+    if (is_doctor_search and doctors_meta) and resources_meta:
+        specialty = doctors_meta[0]['speciality'].lower() if doctors_meta[0].get('speciality') else 'healthcare'
+        return (f"I found {len(doctors_meta)} {specialty} specialists and also {len(resources_meta)} helpful resources "
+                f"related to your query. Please review the profiles and articles below.")
+
+    # ✅ Doctors only
     if is_doctor_search and doctors_meta:
-        specialty = doctors_meta[0]['speciality'].lower()
-        location_hint = ""
-        
-        # Extract location from query if mentioned
-        for word in ['rawalpindi', 'islamabad', 'karachi', 'lahore', 'peshawar', 'quetta']:
-            if word in query.lower():
-                location_hint = f" in {word.title()}"
-                break
-        
+        specialty = doctors_meta[0]['speciality'].lower() if doctors_meta[0].get('speciality') else 'healthcare'
         if len(doctors_meta) == 1:
-            response = f"I've found 1 {specialty} specialist{location_hint} for you. Please review their profile below and contact them directly for an appointment."
-        else:
-            response = f"I've found {len(doctors_meta)} {specialty} specialists{location_hint} for you. Please review their profiles below and contact them directly for appointments."
-            
-    elif is_doctor_search and not doctors_meta:
-        response = f"I couldn't find specific doctors for '{query}' in our database. Here are some suggestions:\n\n"
-        response += "• Try searching with more general terms (e.g., 'cardiologist' instead of 'heart specialist')\n"
-        response += "• Check nearby cities or areas\n"
-        response += "• Contact local hospitals for referrals\n"
-        response += "• For urgent medical needs, visit the nearest emergency room"
-        
-    else:
-        response = "I'm here to help you find healthcare providers and answer general health questions. "
-        if doctors_meta:
-            response += f"Based on your query, you might want to consult with a {doctors_meta[0]['speciality']} specialist. "
-        response += "For specific medical advice, please consult with a qualified healthcare professional."
-    
-    return response
+            return f"I found 1 {specialty} specialist who may be able to help. Please check their profile below."
+        return f"I found {len(doctors_meta)} {specialty} specialists who might match your needs. Explore their profiles below."
+
+    # ✅ Resources only
+    if resources_meta:
+        if len(resources_meta) == 1:
+            return "I came across a helpful article that may answer your question. Check it below."
+        return f"I found {len(resources_meta)} useful articles that might help. Please review them below."
+
+    # ✅ None
+    return "I couldn't find relevant doctors or resources for that query. Try rephrasing or asking about a specific condition or specialty."

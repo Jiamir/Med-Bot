@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import Lottie from "lottie-react";
 import medBotAnimation from "../app/animations/med-bot.json";
 import DoctorCard from "./DoctorCard";
-
+import ResourceCard from "./ResourceCard"; // ✅ Import ResourceCard
 
 // Typing Indicator Component
 const TypingIndicator = () => {
@@ -27,7 +27,7 @@ export default function ChatInterface() {
       id: 1,
       type: "bot",
       content:
-        "Hello! I'm your AI medical assistant. How can I help you find the right healthcare provider today?",
+        "Hello! I'm your AI medical assistant. How can I help you today?",
       timestamp: new Date(),
     },
   ]);
@@ -50,13 +50,6 @@ export default function ChatInterface() {
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  const getCurrentTime = () => {
-    return new Date().toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
   };
 
   const handleSendMessage = async () => {
@@ -86,15 +79,21 @@ export default function ChatInterface() {
         body: JSON.stringify({ message: userMessage.content }),
       });
 
-      let botResponse, doctors = [];
+      let botResponse,
+        doctors = [],
+        resources = [];
       if (response.ok) {
         const data = await response.json();
-        console.log("🔍 Full API Response:", data); // ✅ Debug log
-        
-        botResponse = data.response || "I apologize, but I couldn't generate a proper response at this time.";
-        doctors = data.doctors || []; // ✅ Extract doctors array
-        
-        console.log("👥 Doctors found:", doctors.length); // ✅ Debug log
+        console.log("🔍 Full API Response:", data);
+
+        botResponse =
+          data.response ||
+          "I apologize, but I couldn't generate a proper response at this time.";
+        doctors = data.doctors || [];
+        resources = data.resources || []; // ✅ Extract resources array
+
+        console.log("👥 Doctors found:", doctors.length);
+        console.log("📚 Resources found:", resources.length);
       } else {
         throw new Error("API request failed");
       }
@@ -105,21 +104,21 @@ export default function ChatInterface() {
         id: Date.now() + 1,
         type: "bot",
         content: botResponse,
-        doctors: doctors, // ✅ Include doctors in the message
+        doctors,
+        resources, // ✅ Include resources
         timestamp: new Date(),
       };
 
-      console.log("💬 Bot message with doctors:", botMessage); // ✅ Debug log
+      console.log("💬 Bot message with data:", botMessage);
       setMessages((prev) => [...prev, botMessage]);
-
     } catch (error) {
-      console.error("❌ Error in handleSendMessage:", error); // ✅ Debug log
+      console.error("❌ Error in handleSendMessage:", error);
       setIsTyping(false);
       const fallbackMessage = {
         id: Date.now() + 1,
         type: "bot",
         content:
-          "I'm currently experiencing technical difficulties. Please try again later or contact your healthcare provider directly for urgent medical concerns.",
+          "I'm currently experiencing technical difficulties. Please try again later or contact your healthcare provider directly.",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, fallbackMessage]);
@@ -145,7 +144,6 @@ export default function ChatInterface() {
       <div className="chat-header glass">
         <div className="header-content">
           <div className="logo-section">
-            {/* Lottie Animated Logo */}
             <div className="logo">
               <Lottie
                 animationData={medBotAnimation}
@@ -153,15 +151,11 @@ export default function ChatInterface() {
                 style={{ width: 64, height: 64 }}
               />
             </div>
-
-            {/* App Title */}
             <div className="logo-text">
               <h1 className="app-title text-glow">Med-Bot</h1>
               <p className="app-subtitle">AI Medical Assistant</p>
             </div>
           </div>
-
-          {/* Status Indicators (only Online) */}
           <div className="status-indicators">
             <div className="status-item">
               <span className="status-dot online"></span>
@@ -195,6 +189,23 @@ export default function ChatInterface() {
                         speciality={doctor.speciality}
                         location={doctor.location}
                         fee={doctor.fee}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* ✅ Render resource cards if available */}
+                {message.resources && message.resources.length > 0 && (
+                  <div className="resources-container mt-4 space-y-4">
+                    <div className="text-sm text-gray-600 mb-3 font-medium">
+                      Found {message.resources.length} resource(s):
+                    </div>
+                    {message.resources.map((resource, index) => (
+                      <ResourceCard
+                        key={`${message.id}-resource-${index}`}
+                        title={resource.title}
+                        url={resource.url}
+                        content={resource.content}
                       />
                     ))}
                   </div>
@@ -265,8 +276,6 @@ export default function ChatInterface() {
           </div>
         </div>
       </div>
-
-      {/* Disclaimer */}
     </div>
   );
 }

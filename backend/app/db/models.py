@@ -12,3 +12,11 @@ class Doctor(Base):
     keywords = Column(Text)  # comma-separated for search
     symptom_to_speciality = Column(Text)  # added
     disease_examples = Column(Text)        # added
+
+class DocumentModel(Base):
+    __tablename__ = "documents"
+    id = Column(Integer, primary_key=True, index=True)
+    doc_id = Column(String)
+    title = Column(String)
+    url = Column(String)
+    content = Column(Text)
