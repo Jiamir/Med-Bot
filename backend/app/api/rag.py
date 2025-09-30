@@ -5,13 +5,13 @@ from sqlalchemy import or_
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
 
-from app.db.models import Doctor, DocumentModel
+from app.db.models import Therapist, DocumentModel
 from app.core.embeddings import embeddings
 
 # ----------------------------
 # Config
 # ----------------------------
-FAISS_INDEX_PATH = "faiss_index"
+FAISS_INDEX_PATH = "faiss_index_therapists"
 vectorstore: FAISS = None
 
 # ----------------------------
@@ -24,10 +24,8 @@ def build_vectorstore(db: Session, persist: bool = True):
         print("❌ Embeddings not available, skipping vectorstore build")
         return None
 
-    # Try to load existing
     if persist and os.path.exists(FAISS_INDEX_PATH):
         try:
-            # ✅ Try with the parameter first (newer versions)
             try:
                 vectorstore = FAISS.load_local(
                     FAISS_INDEX_PATH,
@@ -35,9 +33,7 @@ def build_vectorstore(db: Session, persist: bool = True):
                     allow_dangerous_deserialization=True
                 )
             except TypeError:
-                # ✅ Fallback for older versions without the parameter
                 vectorstore = FAISS.load_local(FAISS_INDEX_PATH, embeddings)
-            
             print("✅ Loaded existing FAISS vectorstore")
             return vectorstore
         except Exception as e:
@@ -45,27 +41,27 @@ def build_vectorstore(db: Session, persist: bool = True):
             print("🔄 Building new vectorstore...")
 
     try:
-        # Doctors
-        doctors = db.query(Doctor).all()
-        print(f"📋 Processing {len(doctors)} doctors...")
+        therapists = db.query(Therapist).all()
+        print(f"📋 Processing {len(therapists)} therapists...")
 
-        doctor_docs = [
+        therapist_docs = [
             Document(
-                page_content=f"Doctor {d.name}. Speciality: {d.speciality or ''}. "
-                             f"Keywords: {d.keywords or ''}. "
-                             f"Symptoms: {d.symptom_to_speciality or ''}. "
-                             f"Diseases: {d.disease_examples or ''}. "
-                             f"Location: {d.location or ''}",
+                page_content=f"Therapist {t.provider_name}. Company: {t.company_name or ''}. "
+                             f"Type: {t.provider_type or ''}. "
+                             f"Keywords: {t.keywords or ''}. "
+                             f"Description: {t.description or ''}. "
+                             f"Location: {t.address or ''}, {t.city or ''}, {t.state or ''}",
                 metadata={
-                    "id": d.id,
-                    "type": "doctor",
-                    "name": d.name,
-                    "speciality": d.speciality,
-                    "location": d.location,
-                    "fee": getattr(d, 'fee', None)
+                    "id": t.id,
+                    "type": "therapist",
+                    "provider_name": t.provider_name,
+                    "company_name": t.company_name,
+                    "provider_type": t.provider_type,
+                    "email": t.email,
+                    "location": t.address
                 }
             )
-            for d in doctors
+            for t in therapists
         ]
 
         # Documents (resources)
@@ -94,8 +90,8 @@ def build_vectorstore(db: Session, persist: bool = True):
                     )
                 )
 
-        # Combine
-        all_docs = doctor_docs + document_docs
+        # Combine all
+        all_docs = therapist_docs + document_docs
         print(f"🔨 Building FAISS index with {len(all_docs)} total documents...")
         vectorstore = FAISS.from_documents(all_docs, embeddings)
         print("✅ Built new FAISS vectorstore")
@@ -113,28 +109,26 @@ def build_vectorstore(db: Session, persist: bool = True):
         vectorstore = None
         return None
 
-
 # ----------------------------
-# 2️⃣ Doctor retrieval
+# 2️⃣ Therapist retrieval
 # ----------------------------
-def retrieve_doctors(query: str, k: int = 5):
+def retrieve_therapists(query: str, k: int = 5):
     if vectorstore is None:
         print("⚠️ Vectorstore not available")
         return []
 
     try:
         results = vectorstore.similarity_search(query, k=k)
-        doctors = [r.metadata for r in results if r.metadata.get("type") == "doctor"]
-        return doctors
+        therapists = [r.metadata for r in results if r.metadata.get("type") == "therapist"]
+        return therapists
     except Exception as e:
-        print(f"❌ Error in doctor search: {e}")
+        print(f"❌ Error in therapist search: {e}")
         return []
-
 
 # ----------------------------
 # 3️⃣ Resource retrieval
 # ----------------------------
-def retrieve_resources(query: str, top_k: int = 5):  # ✅ Fixed parameter name
+def retrieve_resources(query: str, top_k: int = 5):
     if vectorstore is None:
         print("⚠️ Vectorstore not available")
         return []
@@ -147,35 +141,33 @@ def retrieve_resources(query: str, top_k: int = 5):  # ✅ Fixed parameter name
         print(f"❌ Error in resource search: {e}")
         return []
 
-
 # ----------------------------
-# 4️⃣ Mixed retrieval (doctors + resources)
+# 4️⃣ Mixed retrieval (therapists + resources)
 # ----------------------------
 def retrieve_mixed(query: str, k: int = 10):
     if vectorstore is None:
         print("⚠️ Vectorstore not available")
-        return {"doctors": [], "resources": []}
+        return {"therapists": [], "resources": []}
 
     try:
         results = vectorstore.similarity_search(query, k=k)
-        doctors, resources = [], []
+        therapists, resources = [], []
 
         for r in results:
-            if r.metadata.get("type") == "doctor":
-                doctors.append(r.metadata)
+            if r.metadata.get("type") == "therapist":
+                therapists.append(r.metadata)
             elif r.metadata.get("type") == "resource":
                 resources.append(r.metadata)
 
-        return {"doctors": doctors, "resources": resources}
+        return {"therapists": therapists, "resources": resources}
     except Exception as e:
         print(f"❌ Mixed retrieval failed: {e}")
-        return {"doctors": [], "resources": []}
-
+        return {"therapists": [], "resources": []}
 
 # ----------------------------
-# 5️⃣ Doctor retrieval pipeline (semantic + fallback keyword)
+# 5️⃣ Therapist retrieval pipeline (semantic + fallback keyword)
 # ----------------------------
-def retrieve_top_doctors(query: str, db: Session, top_k: int = 5):
+def retrieve_top_therapists(query: str, db: Session, top_k: int = 5):
     global vectorstore
 
     if vectorstore is None and embeddings is not None:
@@ -187,76 +179,51 @@ def retrieve_top_doctors(query: str, db: Session, top_k: int = 5):
             import time
             start = time.time()
             
-            # ✅ Search with timeout protection
-            top_metadata = vectorstore.similarity_search(query, k=top_k * 2)  # Get more to filter
-            
+            top_metadata = vectorstore.similarity_search(query, k=top_k * 2)
             elapsed = time.time() - start
             print(f"⏱️ FAISS search took {elapsed:.2f}s")
             
             if top_metadata:
                 top_ids = [
                     m.metadata.get("id")
-                    for m in top_metadata if m.metadata.get("type") == "doctor"
-                ][:top_k]  # Limit after filtering
-                
+                    for m in top_metadata if m.metadata.get("type") == "therapist"
+                ][:top_k]
                 top_ids = [i for i in top_ids if i is not None]
 
                 from app.db import crud
-                doctors = crud.get_doctors_by_ids(db, top_ids) if top_ids else []
-                if doctors:
-                    print(f"✅ Found {len(doctors)} doctors via semantic search")
-                    return doctors
+                therapists = crud.get_therapists_by_ids(db, top_ids) if top_ids else []
+                if therapists:
+                    print(f"✅ Found {len(therapists)} therapists via semantic search")
+                    return therapists
         except Exception as e:
             print(f"⚠️ Semantic search failed: {e}")
             import traceback
             traceback.print_exc()
 
     print("🔎 Falling back to keyword search")
-    return keyword_search_doctors(query, db, top_k)
-
+    return keyword_search_therapists(query, db, top_k)
 
 # ----------------------------
-# 6️⃣ Keyword search fallback
+# 6️⃣ Keyword search fallback for therapists
 # ----------------------------
-def keyword_search_doctors(query: str, db: Session, limit: int = 5):
+def keyword_search_therapists(query: str, db: Session, limit: int = 5):
     try:
         query_lower = query.lower().strip()
-        print(f"🔎 Keyword searching for: '{query_lower}'")
+        from app.db import crud
 
-        # Basic specialty mapping
-        specialty_mapping = {
-            'heart': 'cardiology',
-            'cardio': 'cardiology',
-            'gynae': 'gynecology',
-            'skin': 'dermatology',
-            'bone': 'orthopedics',
-            'eye': 'ophthalmology',
-            'brain': 'neurology',
-            'child': 'pediatrics',
-            'autism': 'pediatrics',  # ✅ Added autism mapping
-            'general': 'general medicine'
-        }
-
-        specialty_queries = [s for k, s in specialty_mapping.items() if k in query_lower]
-        doctors_query = db.query(Doctor)
-
-        if specialty_queries:
-            doctors_query = doctors_query.filter(
-                or_(*[Doctor.speciality.ilike(f"%{s}%") for s in specialty_queries])
+        therapists_query = db.query(Therapist).filter(
+            or_(
+                Therapist.provider_name.ilike(f"%{query_lower}%"),
+                (Therapist.keywords != None) & Therapist.keywords.ilike(f"%{query_lower}%"),
+                Therapist.provider_type.ilike(f"%{query_lower}%"),
+                Therapist.city.ilike(f"%{query_lower}%"),
+                Therapist.state.ilike(f"%{query_lower}%")
             )
-        else:
-            doctors_query = doctors_query.filter(
-                or_(
-                    Doctor.name.ilike(f"%{query_lower}%"),
-                    Doctor.speciality.ilike(f"%{query_lower}%"),
-                    (Doctor.keywords != None) & Doctor.keywords.ilike(f"%{query_lower}%"),
-                    Doctor.location.ilike(f"%{query_lower}%")
-                )
-            )
+        )
 
-        doctors = doctors_query.limit(limit).all()
-        print(f"✅ Keyword search found {len(doctors)} doctors")
-        return doctors
+        therapists = therapists_query.limit(limit).all()
+        print(f"✅ Keyword search found {len(therapists)} therapists")
+        return therapists
 
     except Exception as e:
         print(f"❌ Keyword search error: {e}")

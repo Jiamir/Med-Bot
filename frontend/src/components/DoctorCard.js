@@ -1,29 +1,26 @@
 "use client";
 
 import { MapPin, Stethoscope, ExternalLink } from "lucide-react";
-import Image from "next/image";
+
 const DoctorCard = ({
   name,
-  speciality,
-  location,
-  fee,
-  latitude,
-  longitude,
+  providerType,
+  address,
+  city,
+  state,
+  email, // use email instead of fee
 }) => {
-  const cleanName =
-    name?.replace(/^Dr\.\s*Dr\.\s*/, "Dr. ").replace(/^Dr\s*Dr\s*/, "Dr. ") ||
-    "Dr. Unknown";
+  const cleanName = name || "Therapist Unknown";
 
-  // Link to Google Maps for directions
+  // Combine address, city, state
+  const location = address
+    ? `${address}${city ? ", " + city : ""}${state ? ", " + state : ""}`
+    : "Location not specified";
+
+  // Google Maps search link
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-    location || ""
+    location
   )}`;
-
-  // OpenStreetMap static map (no API key required)
-  const mapImgUrl =
-    latitude && longitude
-      ? `https://staticmap.openstreetmap.de/staticmap.php?center=${latitude},${longitude}&zoom=15&size=300x200&markers=${latitude},${longitude},red-pushpin`
-      : null;
 
   return (
     <div className="doctor-card card-hover">
@@ -32,15 +29,11 @@ const DoctorCard = ({
         <Stethoscope size={28} className="text-white" />
       </div>
 
-      {/* Doctor Info */}
+      {/* Therapist Info */}
       <div className="doctor-info">
         <h3 className="doctor-name">{cleanName}</h3>
-        <p className="doctor-speciality">
-          {speciality || "General Practitioner"}
-        </p>
-        {fee && fee !== "Contact for fee" && (
-          <p className="doctor-fee">Fee: {fee}</p>
-        )}
+        <p className="doctor-speciality">{providerType || "Therapist"}</p>
+        {email && <p className="doctor-email">Email: {email}</p>}
         <a
           href={mapsUrl}
           target="_blank"
@@ -48,35 +41,10 @@ const DoctorCard = ({
           className="doctor-location group"
         >
           <MapPin size={16} className="doctor-location-icon" />
-          <span className="doctor-location-text">
-            {location || "Location not specified"}
-          </span>
+          <span className="doctor-location-text">{location}</span>
           <ExternalLink size={14} className="doctor-location-external" />
         </a>
       </div>
-
-      {/* Mini Map */}
-      {mapImgUrl && (
-        <div className="doctor-map">
-          <a
-            href={mapsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="doctor-map-link"
-          >
-            <div className="doctor-map-container">
-              <Image
-                src={mapImgUrl}
-                alt={`Map of ${cleanName}`}
-                className="doctor-map-image"
-                width={30} // Set an appropriate width
-                height={30} // Set an appropriate height
-                style={{ borderRadius: "8px", objectFit: "cover" }}
-              />
-            </div>
-          </a>
-        </div>
-      )}
     </div>
   );
 };

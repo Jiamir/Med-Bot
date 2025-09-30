@@ -80,7 +80,7 @@ export default function ChatInterface() {
       });
 
       let botResponse,
-        doctors = [],
+        therapists = [],
         resources = [];
       if (response.ok) {
         const data = await response.json();
@@ -89,10 +89,10 @@ export default function ChatInterface() {
         botResponse =
           data.response ||
           "I apologize, but I couldn't generate a proper response at this time.";
-        doctors = data.doctors || [];
-        resources = data.resources || []; // ✅ Extract resources array
+        therapists = data.therapists || [];
+        resources = data.resources || [];
 
-        console.log("👥 Doctors found:", doctors.length);
+        console.log("👥 Therapists found:", therapists.length);
         console.log("📚 Resources found:", resources.length);
       } else {
         throw new Error("API request failed");
@@ -104,8 +104,8 @@ export default function ChatInterface() {
         id: Date.now() + 1,
         type: "bot",
         content: botResponse,
-        doctors,
-        resources, // ✅ Include resources
+        therapists,
+        resources,
         timestamp: new Date(),
       };
 
@@ -176,23 +176,26 @@ export default function ChatInterface() {
               <div className="message-content">
                 <p>{message.content}</p>
 
-                {/* ✅ Render doctor cards if available */}
-                {message.doctors && message.doctors.length > 0 && (
-                  <div className="doctors-container mt-4 space-y-4">
-                    <div className="text-sm text-gray-600 mb-3 font-medium">
-                      Found {message.doctors.length} healthcare provider(s):
-                    </div>
-                    {message.doctors.map((doctor, index) => (
-                      <DoctorCard
-                        key={`${message.id}-doctor-${index}`}
-                        name={doctor.name}
-                        speciality={doctor.speciality}
-                        location={doctor.location}
-                        fee={doctor.fee}
-                      />
-                    ))}
-                  </div>
-                )}
+                {/* ✅ Render therapist cards if available */}
+                {message.therapists && message.therapists.length > 0 && (
+  <div className="doctors-container mt-4 space-y-4">
+    <div className="text-sm text-gray-600 mb-3 font-medium">
+      Found {message.therapists.length} healthcare provider(s):
+    </div>
+    {message.therapists.map((therapist, index) => (
+      <DoctorCard
+        key={`${message.id}-therapist-${index}`}
+        name={therapist.provider_name || "N/A"}
+        providerType={therapist.provider_type || "Therapist"}
+        address={therapist.address || ""}
+        city={therapist.city || ""}
+        state={therapist.state || ""}
+        email={therapist.email || "Not provided"}
+      />
+    ))}
+  </div>
+)}
+
 
                 {/* ✅ Render resource cards if available */}
                 {message.resources && message.resources.length > 0 && (

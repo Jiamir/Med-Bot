@@ -43,7 +43,7 @@ export async function POST(request) {
         },
         body: JSON.stringify({ message: message.trim() }),
       },
-      45000 // 45 second timeout
+      450000 // 45 second timeout
     );
 
     if (!response.ok) {
